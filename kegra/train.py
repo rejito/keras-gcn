@@ -5,21 +5,30 @@ from keras.models import Model
 from keras.optimizers import Adam
 from keras.regularizers import l2
 
-from kegra.layers.graph import GraphConvolution, GraphInput
-from kegra.utils import *
+from layers.graph import GraphConvolution
+from utils import *
 
 import time
 
 # Define parameters
-DATASET = 'cora'
+# DATAPATH = 'data/cora/'
+# DATASET = 'cora' 
+DATAPATH = 'data/brown/'
+DATASET = 'brown'
+SMALLBROWN = False # switch to true for smaller brown set
 FILTER = 'localpool'  # 'chebyshev'
 MAX_DEGREE = 2  # maximum polynomial degree
 SYM_NORM = True  # symmetric (True) vs. left-only (False) normalization
 NB_EPOCH = 200
 PATIENCE = 10  # early stopping patience
 
+# Build content from scratch
+if DATAPATH == 'data/brown/' and DATASET == 'brown':
+    contentbuilder(path="data/partofspeech/glove.6B/", dataset="glove.6B", small_dataset = SMALLBROWN)
+
 # Get data
-X, A, y = load_data(dataset=DATASET)
+X, A, y = load_data(path=DATAPATH, dataset=DATASET)
+# X, A, y = load_data_alt(path=DATAPATH, dataset=DATASET)
 y_train, y_val, y_test, idx_train, idx_val, idx_test, train_mask = get_splits(y)
 
 # Normalize X
@@ -31,7 +40,7 @@ if FILTER == 'localpool':
     A_ = preprocess_adj(A, SYM_NORM)
     support = 1
     graph = [X, A_]
-    G = [GraphInput(sparse=True)]
+    G = [Input(shape=(None, None), batch_shape=(None, None), sparse=True)]
 
 elif FILTER == 'chebyshev':
     """ Chebyshev polynomial basis filters (Defferard et al., NIPS 2016)  """
@@ -41,7 +50,7 @@ elif FILTER == 'chebyshev':
     T_k = chebyshev_polynomial(L_scaled, MAX_DEGREE)
     support = MAX_DEGREE + 1
     graph = [X]+T_k
-    G = [GraphInput(sparse=True) for _ in range(support)]
+    G = [Input(shape=(None, None), batch_shape=(None, None), sparse=True) for _ in range(support)]
 
 else:
     raise Exception('Invalid filter type.')
@@ -57,7 +66,7 @@ H = Dropout(0.5)(H)
 Y = GraphConvolution(y.shape[1], support, activation='softmax')([H]+G)
 
 # Compile model
-model = Model(input=[X_in]+G, output=Y)
+model = Model(inputs=[X_in]+G, outputs=Y)
 model.compile(loss='categorical_crossentropy', optimizer=Adam(lr=0.01))
 
 # Helper variables for main training loop
@@ -73,7 +82,7 @@ for epoch in range(1, NB_EPOCH+1):
 
     # Single training iteration (we mask nodes without labels for loss calculation)
     model.fit(graph, y_train, sample_weight=train_mask,
-              batch_size=A.shape[0], nb_epoch=1, shuffle=False, verbose=0)
+              batch_size=A.shape[0], epochs=1, shuffle=False, verbose=0)
 
     # Predict on full dataset
     preds = model.predict(graph, batch_size=A.shape[0])
